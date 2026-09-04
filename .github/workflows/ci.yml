@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Oldest supported and newest released. The versions in between rarely
+        # break independently and cost minutes for no signal.
+        python-version: ["3.10", "3.13"]
+        os: [ubuntu-latest]
+        include:
+          # The analysis reads files off disk and reports paths, both of which
+          # differ on Windows. One job keeps that honest.
+          - python-version: "3.13"
+            os: windows-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Test
+        run: pytest -q
+
+  selfcheck:
+    # The tool is run against its own source. A tool that reports on Python
+    # code and has never been pointed at any is untested in the way that
+    # matters, and this also proves the ruff subprocess path works, which the
+    # unit tests deliberately avoid depending on.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Run it on itself
+        run: willitbite src --all
+
+  install:
+    # Verifies the way a stranger gets it: build the wheel, install it into a
+    # clean environment with nothing else present, and run it against a file
+    # with a known answer. A suite that runs from the source tree would not
+    # notice a packaging mistake that leaves a module out of the wheel.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Build the wheel
+        run: |
+          pip install build
+          python -m build --wheel
+
+      - name: Install it somewhere clean and run it
+        run: |
+          python -m venv /tmp/clean
+          /tmp/clean/bin/pip install --quiet dist/*.whl ruff
+          /tmp/clean/bin/willitbite --version
+          /tmp/clean/bin/willitbite --help
+
+      - name: Decide a file whose answer is known
+        run: |
+          mkdir -p /tmp/subject
+          cat > /tmp/subject/known.py <<'PY'
+          handlers = []
+          for i in range(3):
+              def handler():
+                  return i
+              handlers.append(handler)
+
+
+          def safe(items=[]):
+              return len(items)
+          PY
+          /tmp/clean/bin/willitbite /tmp/subject --json-out > out.json || true
+          python -c "
+          import json
+          data = json.load(open('out.json'))
+          assert data['bites'] == 1, data
+          biting = [r for r in data['results'] if r['verdict'] == 'BITES']
+          assert biting[0]['code'] == 'B023', biting
+          assert 'handler' in biting[0]['reason'], biting
+          print('decided', data['warnings'], 'warnings,', data['bites'], 'reachable')
+          "
