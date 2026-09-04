@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "willitbite"
+# The version has exactly one home, in the package itself. The release
+# workflow checks the git tag against that same constant, so a tag, a
+# wheel and `willitbite --version` cannot disagree with each other.
+dynamic = ["version"]
+description = "Tell which of ruff's loop-closure and mutable-default warnings can actually reach you at runtime"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "Muhammad Zuhaib Zahid" }]
+keywords = ["ruff", "linting", "static-analysis", "triage", "python", "cli"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Quality Assurance",
+]
+# The analysis uses only the standard library's ast module. ruff is invoked as
+# a subprocess when it is present, so it is not pinned here: a tool that tells
+# you about your linter should not force a version of it on you.
+dependencies = []
+
+[tool.hatch.version]
+path = "src/willitbite/__init__.py"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[project.urls]
+Homepage = "https://github.com/muhzuhaib/willitbite"
+Issues = "https://github.com/muhzuhaib/willitbite/issues"
+Changelog = "https://github.com/muhzuhaib/willitbite/blob/main/CHANGELOG.md"
+
+[project.scripts]
+willitbite = "willitbite.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/willitbite"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
