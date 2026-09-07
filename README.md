@@ -47,8 +47,11 @@ to tell which is which except by reading all of them. That is the job this does.
 
 ## Install and run
 
+From a checkout, until the first tagged release lands on PyPI:
+
 ```
-pip install willitbite
+git clone https://github.com/muhzuhaib/willitbite
+pip install ./willitbite
 willitbite ./src
 ```
 
