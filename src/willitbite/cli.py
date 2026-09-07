@@ -7,8 +7,8 @@ import json
 import sys
 from collections import defaultdict
 
-from . import __version__, escape, mutation, ruffrun
-from .verdict import BITES, CALLEE, ORDER, SAFE, Verdict
+from . import __version__, callsites, escape, mutation, ruffrun
+from .verdict import BITES, CALLEE, LATENT, ORDER, SAFE, Verdict
 
 ANALYSERS = {"B023": escape.analyse, "B006": mutation.analyse}
 
@@ -18,12 +18,21 @@ RULE_TITLES = {
 }
 
 
-def decide(findings):
-    """Attach a verdict to every finding, parsing each file once."""
+def decide(findings, root=None):
+    """Attach a verdict to every finding, parsing each file once.
+
+    The call-site pass is a second look, not a first one. Reading every Python
+    file under ``root`` costs real time on a large tree, and it can only ever
+    change a B006 answer that already came back BITES, which on the codebases
+    this was built against was one warning in a hundred and thirty-three. So
+    the index is built only if there is something for it to decide, and a run
+    that finds nothing biting never pays for it at all.
+    """
     by_file = defaultdict(list)
     for finding in findings:
         by_file[finding["filename"]].append(finding)
 
+    trees = {}
     decided = []
     for filename, group in by_file.items():
         try:
@@ -33,6 +42,7 @@ def decide(findings):
             for finding in group:
                 decided.append({**finding, "verdict": Verdict(CALLEE, f"unreadable: {exc}")})
             continue
+        trees[filename] = tree
         parents = escape.parent_map(tree)
         for finding in group:
             analyse = ANALYSERS.get(finding["code"])
@@ -41,6 +51,20 @@ def decide(findings):
             decided.append(
                 {**finding, "verdict": analyse(tree, finding["line"], parents)}
             )
+
+    if root is not None:
+        pending = [
+            row
+            for row in decided
+            if row["code"] == "B006" and row["verdict"].kind == BITES
+        ]
+        if pending:
+            calls = callsites.index(root)
+            for row in pending:
+                tree = trees.get(row["filename"])
+                if tree is None:
+                    continue
+                row["verdict"] = mutation.analyse(tree, row["line"], calls=calls)
     return decided
 
 
@@ -59,16 +83,21 @@ def render(decided, show_all=False):
         by_rule[row["code"]].append(row)
 
     total_bites = 0
+    total_latent = 0
     for code in sorted(by_rule):
         rows = by_rule[code]
         tally = _counts(rows)
         total_bites += tally[BITES]
+        total_latent += tally[LATENT]
         lines.append(f"{code}  {RULE_TITLES.get(code, '')}")
+        # The latent column is omitted when it is empty rather than printed as a
+        # permanent zero, since only B006 can produce one.
+        latent = f"{tally[LATENT]} latent   " if tally[LATENT] else ""
         lines.append(
-            f"  {len(rows)} warning(s)   {tally[BITES]} can bite   "
+            f"  {len(rows)} warning(s)   {tally[BITES]} can bite   {latent}"
             f"{tally[CALLEE]} depend on a callee   {tally[SAFE]} safe"
         )
-        wanted = ORDER if show_all else (BITES, CALLEE)
+        wanted = ORDER if show_all else (BITES, LATENT, CALLEE)
         for kind in wanted:
             for row in sorted(rows, key=lambda r: (r["filename"], r["line"])):
                 if row["verdict"].kind != kind:
@@ -77,14 +106,18 @@ def render(decided, show_all=False):
                 lines.append(f"           {row['verdict'].reason}")
         lines.append("")
 
+    tail = f", {total_latent} latent" if total_latent else ""
     if not decided:
         lines.append("No B006 or B023 warnings found.")
     elif total_bites == 0:
         lines.append(
-            f"Nothing here can bite. {len(decided)} warning(s), 0 reachable defects."
+            f"Nothing here can bite today. {len(decided)} warning(s), "
+            f"0 reachable defects{tail}."
         )
     else:
-        lines.append(f"{total_bites} of {len(decided)} warning(s) can actually bite.")
+        lines.append(
+            f"{total_bites} of {len(decided)} warning(s) can actually bite{tail}."
+        )
     return lines
 
 
@@ -93,6 +126,7 @@ def as_json(decided):
         {
             "warnings": len(decided),
             "bites": sum(1 for r in decided if r["verdict"].kind == BITES),
+            "latent": sum(1 for r in decided if r["verdict"].kind == LATENT),
             "results": [
                 {
                     "code": r["code"],
@@ -139,7 +173,7 @@ def main(argv=None):
         print(str(exc), file=sys.stderr)
         return 2
 
-    decided = decide(findings)
+    decided = decide(findings, root=args.path)
 
     if args.json_out:
         print(as_json(decided))

@@ -8,19 +8,26 @@ that none of them can actually bite you.
 `willitbite` takes the two rules that produce most of the noise when a project first adopts ruff and
 asks the question the linter cannot: **can this one reach you at runtime?**
 
+Here it is on [ragflow](https://github.com/infiniflow/ragflow), 1,259 files of Python, at commit
+`0c28d59`:
+
 ```
-$ willitbite ./src
+$ willitbite .
+B006  mutable default arguments
+  34 warning(s)   0 can bite   1 latent   13 depend on a callee   20 safe
+    [LATENT] agent/component/message.py:159
+             `kwargs` is mutated before it is rebound (kwargs[...] assigned on line
+             181), but all 2 call sites of `get_kwargs()` pass it explicitly, so the
+             shared default is never the one being changed
+
 B023  closures capturing a loop variable
   99 warning(s)   0 can bite   15 depend on a callee   84 safe
 
-B006  mutable default arguments
-  34 warning(s)   1 can bite   0 depend on a callee   33 safe
-    [BITES] agent/component/message.py:159
-            `kwargs` is mutated before it is rebound (kwargs[...] assigned on
-            line 181), so every call that omits it sees the previous call's changes
-
-1 of 133 warning(s) can actually bite.
+Nothing here can bite today. 133 warning(s), 0 reachable defects, 1 latent.
 ```
+
+133 warnings, ten seconds, and 29 of them are worth a person's time: the one latent
+defect and the 28 that turn on a function the tool cannot see into. The other 104 need nobody.
 
 ## Why this exists
 
@@ -62,12 +69,16 @@ Exit code is 1 when something can bite, 0 when nothing can, 2 when the tool coul
 
 ## Design decisions
 
-**There are three verdicts, not two.** A linter has two states, warned and silent. Reachability has a
-third, because whether a closure escapes sometimes depends on a function this tool cannot see into.
-When a closure is handed to `run_with_retry(...)`, it is safe if that helper calls it and dangerous
-if it stores it. Guessing safe would clear a real defect; guessing unsafe would raise a false alarm
-on the codebases this was built against. So `CALLEE` names the function you have to look at and stops
-there.
+**A linter has two states, warned and silent. This has four.** Two of the four exist because the
+honest answer is sometimes neither of the other two.
+
+`CALLEE` is for a closure handed to `run_with_retry(...)`, which is safe if that helper calls it and
+dangerous if it stores it. Guessing safe would clear a real defect. Guessing unsafe would raise a
+false alarm on every codebase this was built against. So it names the function you have to look at
+and stops there.
+
+`LATENT` is for a function that is genuinely wrong and that nothing currently calls in the way that
+would hurt. It has its own section below.
 
 **Ruff finds the candidates; this decides them.** Reimplementing the rules would be slower, less
 correct, and would drift from ruff's behaviour. Ruff is invoked with `--isolated` on purpose, so the
@@ -80,15 +91,51 @@ them yet is exactly the team that wants this.
 identifier and the line, never restates the rule. A verdict you have to take on trust is worth about
 as much as the warning it replaced.
 
-## Known boundary: call sites are not read yet
+## Latent defects: real, but nothing calls them that way
 
-The B006 answer is about the function, not about the program. If a function mutates its shared
-default, this reports `BITES`, and that is a genuine latent defect. But it only fires in practice
-when some caller omits the argument, and this does not yet check whether any caller does.
+A function that mutates its own mutable default is wrong on its own terms. Whether the wrongness can
+reach you is a separate question, and it is answered in the callers: the shared default is only ever
+the object being mutated when somebody omits the argument.
 
-That distinction is not hypothetical. The `kwargs` example in the output above is real, and every
-current caller of it passes an explicit dict, so today it never triggers. It is still a defect
-waiting for the first caller who does not.
+So B006 warnings that survive the first pass get a second one, across every `.py` file under the
+path you gave. If some caller omits the argument, the verdict stays `BITES`. If every caller passes
+it explicitly, the verdict becomes `LATENT`: still a defect, still reported, but nothing in the tree
+triggers it today.
+
+```
+B006  mutable default arguments
+  2 warning(s)   1 can bite   1 latent   0 depend on a callee   0 safe
+    [BITES] live.py:1
+           `cache` is mutated before it is rebound (cache[...] assigned on line 2),
+           so every call that omits it sees the previous call's changes
+    [LATENT] lib.py:1
+           `items` is mutated before it is rebound (items.append() on line 2), but all
+           2 call sites of `collect()` pass it explicitly, so the shared default is
+           never the one being changed
+```
+
+Those two functions have the same shape. Only their callers differ.
+
+**A latent defect does not fail the build.** The exit code answers "can this bite today", and this
+one cannot, so failing on it would fail every build until somebody rewrote code that currently
+works. It is in the report because it will bite the first caller who leaves the argument out.
+
+## Known boundary: which callers get matched
+
+Call sites are matched **by name**. Resolving `x.send()` to a definition properly needs type
+inference, which this does not do, so a call counts whenever the called name matches, wherever it
+appears. That over-matches, and the over-matching is deliberate: an unrelated `send` elsewhere can
+only add an omission, and an omission is the answer that keeps the warning.
+
+Three things count as no evidence at all, and each of them leaves a warning at `BITES`:
+
+- a `**kwargs` splat at the call site, which might be carrying the argument
+- a `*args` splat, which might be filling the position
+- **no caller anywhere**, which usually means a public entry point called from outside the tree you
+  scanned, and is the case most likely to bite a stranger
+
+The index is only built when something came back `BITES`, so a run that finds nothing reachable
+never pays for the scan.
 
 ## Where this came from
 

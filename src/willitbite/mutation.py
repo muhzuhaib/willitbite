@@ -15,7 +15,8 @@ left of an append" is not enough.
 
 import ast
 
-from .verdict import BITES, CALLEE, SAFE, Verdict
+from .callsites import reach
+from .verdict import BITES, CALLEE, LATENT, SAFE, Verdict
 
 #: Methods that change the receiver in place.
 MUTATORS = frozenset(
@@ -160,18 +161,32 @@ def _escapes_unchanged(fn, name):
     return None
 
 
-def analyse_param(fn, name):
-    """Decide one parameter of one function."""
+def _reaching_mutations(fn, name):
+    """The mutations that touch the shared default, and the rebind line if any."""
     rebound = _rebind_line(fn, name)
     mutations = _mutations(fn, name)
-    reaching = [m for m in mutations if rebound is None or m[0] < rebound]
+    return [m for m in mutations if rebound is None or m[0] < rebound], rebound, mutations
+
+
+def _defect_clause(name, reaching):
+    """The half of the reason that describes the defect itself.
+
+    Shared by BITES and LATENT so the two answers never drift into describing
+    the same defect differently. Only what follows this clause changes.
+    """
+    where = ", ".join(f"{what} on line {line}" for line, what in sorted(reaching))
+    return f"`{name}` is mutated before it is rebound ({where})"
+
+
+def analyse_param(fn, name):
+    """Decide one parameter of one function, from its body alone."""
+    reaching, rebound, mutations = _reaching_mutations(fn, name)
 
     if reaching:
-        where = ", ".join(f"{what} on line {line}" for line, what in sorted(reaching))
         return Verdict(
             BITES,
-            f"`{name}` is mutated before it is rebound ({where}), so every call "
-            f"that omits it sees the previous call's changes",
+            f"{_defect_clause(name, reaching)}, so every call that omits it sees "
+            f"the previous call's changes",
         )
 
     if rebound is not None:
@@ -193,8 +208,46 @@ def analyse_param(fn, name):
     return Verdict(SAFE, f"`{name}` is never mutated, so sharing it is harmless")
 
 
-def analyse(tree, line, parents=None):
-    """Decide one B006 warning reported at ``line``."""
+def _with_call_sites(fn, name, verdict, calls):
+    """Ask the callers whether the defect in ``fn`` can currently fire.
+
+    Only a complete answer changes anything. If every call site was resolved and
+    every one of them passes the argument, the shared default is never the
+    object being mutated and the defect is waiting rather than happening. Any
+    other shape leaves the verdict alone: an unresolved splat, a caller that
+    omits it, or no caller at all are each a reason to keep looking, not a
+    reason to clear it.
+    """
+    if calls is None:
+        return verdict
+
+    found = reach(fn, name, calls)
+    reaching, _, _ = _reaching_mutations(fn, name)
+    clause = _defect_clause(name, reaching)
+
+    if found.total == 0:
+        return Verdict(
+            BITES,
+            f"{clause}, and no call site of `{fn.name}()` was found under this path, "
+            f"so nothing here shows that callers pass it",
+        )
+    if found.unreachable:
+        plural = "" if found.total == 1 else "s"
+        return Verdict(
+            LATENT,
+            f"{clause}, but all {found.total} call site{plural} of `{fn.name}()` pass "
+            f"it explicitly, so the shared default is never the one being changed",
+        )
+    return verdict
+
+
+def analyse(tree, line, parents=None, calls=None):
+    """Decide one B006 warning reported at ``line``.
+
+    ``calls`` is the optional call index from :mod:`willitbite.callsites`.
+    Without it the answer is about the function; with it the answer is about
+    the program, which is a strictly narrower and more useful claim.
+    """
     from .escape import innermost_closure
 
     fn = innermost_closure(tree, line)
@@ -206,9 +259,9 @@ def analyse(tree, line, parents=None):
         return Verdict(CALLEE, f"no mutable default found in the signature of `{fn.name}`")
 
     decided = [(n, analyse_param(fn, n)) for n in names]
-    for _, verdict in decided:
+    for name, verdict in decided:
         if verdict.kind == BITES:
-            return verdict
+            return _with_call_sites(fn, name, verdict, calls)
     for _, verdict in decided:
         if verdict.kind == CALLEE:
             return verdict
