@@ -1,0 +1,49 @@
+name: Wrong verdict
+description: The tool called a warning SAFE (or BITES) and you can show it is wrong
+labels: ["bug"]
+body:
+  - type: textarea
+    id: verdict
+    attributes:
+      label: What the tool claimed
+      description: >
+        The verdict block for the warning in question, from the tool's output
+        or --json-out. A verdict that is wrong is a defect even when nothing
+        crashed: the tool exists so you can stop reading the warnings it clears.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: code
+    attributes:
+      label: The function it is wrong about
+      description: >
+        The function (and, for B023, the call site) that shows the claim is
+        wrong. Trimmed to the smallest thing that reproduces is ideal.
+      render: python
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: What actually happens when this runs
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `willitbite --version`
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Python, ruff and operating system
+      placeholder: "3.13, ruff 0.13, Windows 11"
+    validations:
+      required: true
