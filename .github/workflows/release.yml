@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    # Trusted publishing. PyPI verifies this workflow's identity through
+    # OpenID Connect and issues a short lived token for the upload, so there
+    # is no API token stored anywhere: not in a repository secret, not on a
+    # laptop, and nothing to leak or rotate.
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Check the tag matches the version in the package
+        # A tag that disagrees with __version__ publishes a release whose
+        # metadata lies about itself, and it cannot be corrected afterwards
+        # because PyPI does not allow a version to be reuploaded.
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version=$(python -c "import re,pathlib; print(re.search(r'__version__ = \"(.*)\"', pathlib.Path('src/willitbite/__init__.py').read_text()).group(1))")
+          echo "tag=$tag package=$version"
+          test "$tag" = "$version"
+
+      - name: Build
+        run: |
+          pip install build
+          python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
