@@ -1,6 +1,7 @@
 # willitbite
 
 [![CI](https://github.com/muhzuhaib/willitbite/actions/workflows/ci.yml/badge.svg)](https://github.com/muhzuhaib/willitbite/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/willitbite.svg)](https://pypi.org/project/willitbite/)
 
 Ruff will tell you that 99 closures in your codebase capture a loop variable. It will not tell you
 that none of them can actually bite you.
@@ -47,12 +48,16 @@ to tell which is which except by reading all of them. That is the job this does.
 
 ## Install and run
 
-From a checkout, until the first tagged release lands on PyPI:
+```
+pip install willitbite
+willitbite ./src
+```
+
+Python 3.10 or newer. To work from a checkout instead:
 
 ```
 git clone https://github.com/muhzuhaib/willitbite
 pip install ./willitbite
-willitbite ./src
 ```
 
 Ruff is called as a subprocess if it is on your PATH. If you would rather run your own:
