@@ -5,7 +5,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-08
+
 ### Added
+
+- First release.
 
 - B023 escape analysis: decides whether a closure that captures a loop variable
   can still be called after the loop has moved on.
