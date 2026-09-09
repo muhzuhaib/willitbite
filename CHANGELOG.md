@@ -5,6 +5,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-09
+
+### Fixed
+
+- Call sites written through an import alias (`from lib import collect as c`,
+  then `c(...)`) were invisible to the call-site pass. A warning whose only
+  visible caller supplied the argument could be cleared as `LATENT` while the
+  call that omits the argument sat in the same tree. Aliased calls are now
+  indexed under the imported name as well as the alias.
+
 ## [0.1.0] - 2026-09-08
 
 ### Added
