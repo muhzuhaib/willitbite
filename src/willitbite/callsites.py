@@ -15,7 +15,10 @@ to a definition properly needs type inference, which this does not have. So a
 call is counted whenever the called name matches, wherever it appears. That
 over-matches: an unrelated ``send`` in another module is counted too. The
 over-matching is in the safe direction, because an extra caller can only ever
-add an omission and an omission is the answer that keeps the warning.
+add an omission and an omission is the answer that keeps the warning. Import
+aliases are resolved (``from lib import collect as c`` files ``c(...)`` under
+``collect`` too), because an alias hides callers without adding any, and
+hidden callers are the one direction this pass must never err in.
 
 **Everything unresolvable stays unresolved.** A ``**kwargs`` splat might be
 carrying the argument, a ``*args`` splat might be filling the position, and a
@@ -78,6 +81,29 @@ def python_files(root):
                 yield os.path.join(folder, name)
 
 
+def import_aliases(tree):
+    """Map each local alias in ``tree`` to the imported name it stands for.
+
+    ``from lib import collect as c`` makes ``c(...)`` a call to ``collect``, so
+    the index needs both spellings or the aliased callers vanish, and a caller
+    the index cannot see is a caller it counts as absent.
+
+    Only ``as`` bindings belong here. An import without one already matches by
+    its own name, and indexing it a second time would double-count its callers.
+    ``import lib as l`` aliases a module, not a function. A star import names
+    nothing at all. Relative imports work because the module path is never
+    consulted, only the name being imported.
+    """
+    aliases = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom) or node.module is None:
+            continue
+        for alias in node.names:
+            if alias.asname is not None:
+                aliases[alias.asname] = alias.name
+    return aliases
+
+
 def index(root):
     """Map every called name under ``root`` to the calls that use it.
 
@@ -95,12 +121,20 @@ def index(root):
                 tree = ast.parse(handle.read())
         except (OSError, SyntaxError, ValueError, UnicodeDecodeError):
             continue
+        aliases = import_aliases(tree)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
             callee = node.func
             if isinstance(callee, ast.Name):
-                found[callee.id].append(Call(filename, node.lineno, node, False))
+                call = Call(filename, node.lineno, node, False)
+                found[callee.id].append(call)
+                # Also under the imported name, so the definition sees its
+                # aliased callers. Purely additive: the alias spelling stays
+                # indexed for any same-named function of its own.
+                resolved = aliases.get(callee.id)
+                if resolved is not None:
+                    found[resolved].append(call)
             elif isinstance(callee, ast.Attribute):
                 found[callee.attr].append(Call(filename, node.lineno, node, True))
     return found

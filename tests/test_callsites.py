@@ -180,6 +180,48 @@ def test_a_bound_method_call_that_omits_it_still_bites(tmp_path):
 
 
 # --------------------------------------------------------------------------
+# Import aliases.
+#
+# ``from lib import collect as c`` spells every call ``c(...)``. The pass
+# matches by name, so before aliases were resolved those callers were simply
+# absent from the index, and absence reads as safety here: a warning whose
+# only aliased caller omitted the argument came back LATENT with the call
+# that triggers it sitting in the same tree. These are the tests that earn
+# the feature.
+# --------------------------------------------------------------------------
+
+
+def test_a_call_through_an_import_alias_is_still_found(tmp_path):
+    v = decide(
+        tmp_path,
+        {
+            "lib.py": MUTATES,
+            "app.py": "from lib import collect as c\ncollect(1, [])\nc(2)\n",
+        },
+    )
+    assert v.kind == BITES
+
+
+def test_an_alias_supplying_the_argument_is_evidence_for_latent(tmp_path):
+    v = decide(
+        tmp_path,
+        {"lib.py": MUTATES, "app.py": "from lib import collect as c\nc(1, [])\n"},
+    )
+    assert v.kind == LATENT
+
+
+def test_a_relative_import_alias_resolves_the_same_way(tmp_path):
+    v = decide(
+        tmp_path,
+        {
+            "lib.py": MUTATES,
+            "pkg/app.py": "from ..lib import collect as c\ncollect(1, [])\nc(2)\n",
+        },
+    )
+    assert v.kind == BITES
+
+
+# --------------------------------------------------------------------------
 # The index itself.
 # --------------------------------------------------------------------------
 
@@ -208,6 +250,28 @@ def test_index_survives_a_file_it_cannot_parse(tmp_path):
 def test_index_records_attribute_calls_under_the_attribute_name(tmp_path):
     calls = project(tmp_path, {"app.py": "obj.send(1)\nsend(2)\n"})
     assert len(calls["send"]) == 2
+
+
+def test_index_files_an_aliased_call_under_both_names(tmp_path):
+    calls = project(
+        tmp_path, {"app.py": "from lib import collect as c\nc(1)\nc(2)\n"}
+    )
+    assert len(calls["c"]) == 2
+    assert len(calls["collect"]) == 2
+
+
+def test_an_import_without_an_alias_is_indexed_exactly_once(tmp_path):
+    calls = project(
+        tmp_path, {"app.py": "from lib import collect\ncollect(1)\ncollect(2)\n"}
+    )
+    assert len(calls["collect"]) == 2
+
+
+def test_a_star_import_resolves_nothing(tmp_path):
+    """A star import names no local alias, so there is nothing to resolve."""
+    calls = project(tmp_path, {"app.py": "from lib import *\nc(1)\n"})
+    assert len(calls["c"]) == 1
+    assert len(calls["collect"]) == 0
 
 
 # --------------------------------------------------------------------------
