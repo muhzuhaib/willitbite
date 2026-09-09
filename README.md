@@ -135,12 +135,19 @@ inference, which this does not do, so a call counts whenever the called name mat
 appears. That over-matches, and the over-matching is deliberate: an unrelated `send` elsewhere can
 only add an omission, and an omission is the answer that keeps the warning.
 
-Three things count as no evidence at all, and each of them leaves a warning at `BITES`:
+Import aliases are resolved before the name match runs: `from lib import collect as c` followed by
+`c(...)` is counted as a call to `collect`, including through relative imports. This matters because
+an alias hides callers without adding any, and a caller the index cannot see counts as absent, which
+is the direction a false `LATENT` comes from.
+
+Four things count as no evidence at all, and each of them leaves a warning at `BITES`:
 
 - a `**kwargs` splat at the call site, which might be carrying the argument
 - a `*args` splat, which might be filling the position
 - **no caller anywhere**, which usually means a public entry point called from outside the tree you
   scanned, and is the case most likely to bite a stranger
+- a name that reaches the function some other way: a star import, a rebinding like
+  `handler = collect`, or dispatch that only exists at runtime
 
 The index is only built when something came back `BITES`, so a run that finds nothing reachable
 never pays for the scan.
