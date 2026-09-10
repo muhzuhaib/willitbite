@@ -5,6 +5,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Call sites written through a package re-export were invisible to the call-site
+  pass. When `pkg/__init__.py` holds `from lib import collect as c` and a caller
+  writes `from pkg import c`, the caller's own file aliases nothing, so the call
+  was filed under `c` alone and a warning could be cleared `LATENT` while the
+  call that omits the argument sat in the same tree. Each module's import
+  bindings are now collected first and every call is filed under all spellings
+  its chain of bindings reaches, however many re-exports it passes through.
+
 ## [0.1.1] - 2026-09-09
 
 ### Fixed
