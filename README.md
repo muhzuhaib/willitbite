@@ -135,10 +135,13 @@ inference, which this does not do, so a call counts whenever the called name mat
 appears. That over-matches, and the over-matching is deliberate: an unrelated `send` elsewhere can
 only add an omission, and an omission is the answer that keeps the warning.
 
-Import aliases are resolved before the name match runs: `from lib import collect as c` followed by
-`c(...)` is counted as a call to `collect`, including through relative imports. This matters because
-an alias hides callers without adding any, and a caller the index cannot see counts as absent, which
-is the direction a false `LATENT` comes from.
+Import aliases are resolved before the name match runs, and so are chains of them across modules.
+`from lib import collect as c`, re-exported by a package `__init__.py` and imported again elsewhere
+as `from pkg import c`, files every spelling of the call under `collect`. Each hop follows one
+import binding, and a hop whose target module is outside the tree you scanned still contributes the
+name before it ends there, which is all the match needs. This matters because an alias hides callers
+without adding any, and a caller the index cannot see counts as absent, which is the direction a
+false `LATENT` comes from.
 
 Four things count as no evidence at all, and each of them leaves a warning at `BITES`:
 
@@ -147,7 +150,8 @@ Four things count as no evidence at all, and each of them leaves a warning at `B
 - **no caller anywhere**, which usually means a public entry point called from outside the tree you
   scanned, and is the case most likely to bite a stranger
 - a name that reaches the function some other way: a star import, a rebinding like
-  `handler = collect`, or dispatch that only exists at runtime
+  `handler = collect`, a re-export written as an assignment (`c = collect` in an `__init__.py`)
+  rather than as an import, a module-level `__getattr__`, or dispatch that only exists at runtime
 
 The index is only built when something came back `BITES`, so a run that finds nothing reachable
 never pays for the scan.
