@@ -104,6 +104,79 @@ def import_aliases(tree):
     return aliases
 
 
+def module_name(filename):
+    """The dotted module name of ``filename``, relative to its package root.
+
+    Python resolves imports against package roots, not against whatever
+    directory happened to be scanned, so the name is derived by walking up
+    from the file only while each directory carries an ``__init__.py``. That
+    makes ``src/pkg/lib.py`` name itself ``pkg.lib`` exactly as the imports
+    inside the tree spell it, and a directory of loose scripts stays flat.
+    """
+    folder, name = os.path.split(os.path.abspath(filename))
+    parts = [] if name == "__init__.py" else [name[:-3]]
+    while os.path.isfile(os.path.join(folder, "__init__.py")):
+        folder, head = os.path.split(folder)
+        if not head:
+            break
+        parts.append(head)
+    parts.reverse()
+    return ".".join(parts)
+
+
+def _source_module(module, is_package, level, target):
+    """Where an import imports from, as an absolute module path.
+
+    A relative level counts up from the package containing the file's own
+    module: one dot for a package's own ``__init__`` and for its siblings.
+    A level that walks past the top of the derived tree cannot be resolved
+    against anything real, so the bare module is kept rather than dropped:
+    the binding still names what it imports, and a name is all the first hop
+    of a chain needs.
+    """
+    if level == 0:
+        return target
+    base = module.split(".") if module else []
+    if not is_package:
+        base = base[:-1]
+    if level - 1 > len(base):
+        return target
+    base = base[: len(base) - (level - 1)]
+    if target:
+        base.append(target)
+    return ".".join(base)
+
+
+def import_bindings(tree, module, is_package):
+    """Map each local name ``tree`` imports to where it was imported from.
+
+    ``from lib import collect as c`` records ``c`` standing for ``collect``
+    of module ``lib``, and imports without an ``as`` are recorded too,
+    because a later hop through a re-export needs the edge. The values are
+    sets: two imports of one local name keep both branches, and two files
+    that derive the same module name in a flat tree merge rather than
+    overwrite. Either way following a branch only ever adds a spelling,
+    which is the safe direction.
+
+    Bindings from inside functions are collected as if they were module
+    level, which over-approximates scope. Over-matching adds callers, and
+    added callers are the safe direction. Plain ``import lib`` is absent on
+    purpose: its calls are attribute calls and the attribute name is already
+    indexed. A star import names no local binding at all.
+    """
+    bindings = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        source = _source_module(module, is_package, node.level, node.module)
+        for alias in node.names:
+            if alias.name == "*":
+                continue
+            local = alias.asname or alias.name
+            bindings.setdefault(local, set()).add((source, alias.name))
+    return bindings
+
+
 def index(root):
     """Map every called name under ``root`` to the calls that use it.
 
