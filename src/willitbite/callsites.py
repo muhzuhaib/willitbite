@@ -17,8 +17,10 @@ over-matches: an unrelated ``send`` in another module is counted too. The
 over-matching is in the safe direction, because an extra caller can only ever
 add an omission and an omission is the answer that keeps the warning. Import
 aliases are resolved (``from lib import collect as c`` files ``c(...)`` under
-``collect`` too), because an alias hides callers without adding any, and
-hidden callers are the one direction this pass must never err in.
+``collect`` too), and so are chains of them across modules: a package that
+re-exports ``collect`` as ``c`` makes ``from pkg import c`` a caller of
+``collect``. Both matter because an alias hides callers without adding any,
+and hidden callers are the one direction this pass must never err in.
 
 **Everything unresolvable stays unresolved.** A ``**kwargs`` splat might be
 carrying the argument, a ``*args`` splat might be filling the position, and a
@@ -79,29 +81,6 @@ def python_files(root):
         for name in names:
             if name.endswith(".py"):
                 yield os.path.join(folder, name)
-
-
-def import_aliases(tree):
-    """Map each local alias in ``tree`` to the imported name it stands for.
-
-    ``from lib import collect as c`` makes ``c(...)`` a call to ``collect``, so
-    the index needs both spellings or the aliased callers vanish, and a caller
-    the index cannot see is a caller it counts as absent.
-
-    Only ``as`` bindings belong here. An import without one already matches by
-    its own name, and indexing it a second time would double-count its callers.
-    ``import lib as l`` aliases a module, not a function. A star import names
-    nothing at all. Relative imports work because the module path is never
-    consulted, only the name being imported.
-    """
-    aliases = {}
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.ImportFrom) or node.module is None:
-            continue
-        for alias in node.names:
-            if alias.asname is not None:
-                aliases[alias.asname] = alias.name
-    return aliases
 
 
 def module_name(filename):
@@ -177,37 +156,83 @@ def import_bindings(tree, module, is_package):
     return bindings
 
 
+def _parse(filename):
+    """One file's syntax tree, or None if it cannot be read or parsed."""
+    # Closed explicitly rather than left to the collector: this runs once
+    # per file across a whole source tree, and a few thousand open handles
+    # is its own kind of failure.
+    try:
+        with open(filename, encoding="utf-8") as handle:
+            return ast.parse(handle.read())
+    except (OSError, SyntaxError, ValueError, UnicodeDecodeError):
+        return None
+
+
+def _spellings(module, name, bindings):
+    """Every name ``name`` in ``module`` can be reached under, itself included.
+
+    Each hop follows one import binding, so ``from pkg import c`` where
+    ``pkg`` re-exports ``collect`` as ``c`` ends at ``collect``, however many
+    packages the re-export passes through. A hop whose target module is not
+    in the tree still contributes its name, which is all the eventual match
+    needs, and then ends there. The spelling written in the source file
+    always stays, because some other module may define a function of its own
+    under it. The visited set is what makes a cycle of re-exports terminate.
+    """
+    names = {name}
+    seen = {(module, name)}
+    frontier = [(module, name)]
+    while frontier:
+        current = frontier.pop()
+        for target in bindings.get(current[0], {}).get(current[1], ()):
+            if target not in seen:
+                seen.add(target)
+                names.add(target[1])
+                frontier.append(target)
+    return names
+
+
 def index(root):
     """Map every called name under ``root`` to the calls that use it.
 
     A file that cannot be read or parsed is skipped rather than fatal. The index
     is a source of evidence, and missing evidence is already handled: it leaves
     warnings where they are.
+
+    Two passes: the import bindings of every module are collected first,
+    because a call can only be filed under its full chain of spellings once
+    every module's bindings are known. Files are parsed again for their calls
+    rather than held in memory: a tree of a few thousand files is real, and a
+    few thousand live syntax trees is its own kind of failure.
     """
+    bindings = defaultdict(dict)
+    for filename in python_files(root):
+        tree = _parse(filename)
+        if tree is None:
+            continue
+        module = module_name(filename)
+        is_package = os.path.basename(filename) == "__init__.py"
+        for local, sources in import_bindings(tree, module, is_package).items():
+            bindings[module].setdefault(local, set()).update(sources)
+
     found = defaultdict(list)
     for filename in python_files(root):
-        # Closed explicitly rather than left to the collector: this runs once
-        # per file across a whole source tree, and a few thousand open handles
-        # is its own kind of failure.
-        try:
-            with open(filename, encoding="utf-8") as handle:
-                tree = ast.parse(handle.read())
-        except (OSError, SyntaxError, ValueError, UnicodeDecodeError):
+        tree = _parse(filename)
+        if tree is None:
             continue
-        aliases = import_aliases(tree)
+        module = module_name(filename)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
             callee = node.func
             if isinstance(callee, ast.Name):
                 call = Call(filename, node.lineno, node, False)
-                found[callee.id].append(call)
-                # Also under the imported name, so the definition sees its
-                # aliased callers. Purely additive: the alias spelling stays
-                # indexed for any same-named function of its own.
-                resolved = aliases.get(callee.id)
-                if resolved is not None:
-                    found[resolved].append(call)
+                # Under every spelling the name can be reached under, so the
+                # definition sees its callers through aliases and re-exports
+                # alike. Purely additive: the written spelling stays indexed
+                # for any same-named function of its own.
+                for spelling in _spellings(module, callee.id, bindings):
+                    found[spelling].append(call)
             elif isinstance(callee, ast.Attribute):
                 found[callee.attr].append(Call(filename, node.lineno, node, True))
     return found

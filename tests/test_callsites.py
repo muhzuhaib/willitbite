@@ -222,6 +222,111 @@ def test_a_relative_import_alias_resolves_the_same_way(tmp_path):
 
 
 # --------------------------------------------------------------------------
+# Re-export chains.
+#
+# ``pkg/__init__.py`` holding ``from lib import collect as c`` while a caller
+# writes ``from pkg import c`` is the common package shape, and a per-file
+# alias table cannot see it: the caller's own file aliases nothing, so the
+# call was filed under ``c`` alone and the definition never heard of it. A
+# visible caller that supplies the argument then reads as the whole story and
+# the warning is cleared LATENT with the omitting call sitting in the tree.
+# These tests earn the chain.
+# --------------------------------------------------------------------------
+
+
+def test_a_reexported_omitting_caller_stops_a_false_latent(tmp_path):
+    v = decide(
+        tmp_path,
+        {
+            "lib.py": MUTATES,
+            "pkg/__init__.py": "from lib import collect as c\n",
+            "app.py": "from pkg import c\nc(2)\n",
+            "other.py": "from lib import collect\ncollect(1, [])\n",
+        },
+    )
+    assert v.kind == BITES
+
+
+def test_a_reexport_caller_supplying_it_is_evidence_for_latent(tmp_path):
+    v = decide(
+        tmp_path,
+        {
+            "lib.py": MUTATES,
+            "pkg/__init__.py": "from lib import collect as c\n",
+            "app.py": "from pkg import c\nc(1, [])\n",
+        },
+    )
+    assert v.kind == LATENT
+    assert "1" in v.reason
+
+
+def test_a_relative_reexport_hides_the_same_caller(tmp_path):
+    v = decide(
+        tmp_path,
+        {
+            "pkg/lib.py": MUTATES,
+            "pkg/__init__.py": "from .lib import collect as c\n",
+            "app.py": "from pkg import c\nc(2)\n",
+            "other.py": "from pkg.lib import collect\ncollect(1, [])\n",
+        },
+        defining="pkg/lib.py",
+    )
+    assert v.kind == BITES
+
+
+def test_an_alias_of_a_reexported_name_adds_a_third_hop(tmp_path):
+    v = decide(
+        tmp_path,
+        {
+            "lib.py": MUTATES,
+            "pkg/__init__.py": "from lib import collect as c\n",
+            "app.py": "from pkg import c as gather\ngather(2)\n",
+            "other.py": "from lib import collect\ncollect(1, [])\n",
+        },
+    )
+    assert v.kind == BITES
+
+
+def test_a_chain_through_two_reexports_is_followed(tmp_path):
+    v = decide(
+        tmp_path,
+        {
+            "lib.py": MUTATES,
+            "pkg/__init__.py": "from lib import collect as c\n",
+            "wrapper/__init__.py": "from pkg import c\n",
+            "app.py": "from wrapper import c\nc(2)\n",
+            "other.py": "from lib import collect\ncollect(1, [])\n",
+        },
+    )
+    assert v.kind == BITES
+
+
+def test_index_files_a_reexported_call_under_both_names(tmp_path):
+    calls = project(
+        tmp_path,
+        {
+            "lib.py": MUTATES,
+            "pkg/__init__.py": "from lib import collect as c\n",
+            "app.py": "from pkg import c\nc(1, [])\nc(2)\n",
+        },
+    )
+    assert len(calls["c"]) == 2
+    assert len(calls["collect"]) == 2
+
+
+def test_a_binding_cycle_terminates(tmp_path):
+    calls = project(
+        tmp_path,
+        {
+            "a.py": "from b import n as m\nm(1)\n",
+            "b.py": "from a import m as n\n",
+        },
+    )
+    assert len(calls["m"]) == 1
+    assert len(calls["n"]) == 1
+
+
+# --------------------------------------------------------------------------
 # The index itself.
 # --------------------------------------------------------------------------
 
