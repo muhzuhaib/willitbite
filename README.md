@@ -135,23 +135,43 @@ inference, which this does not do, so a call counts whenever the called name mat
 appears. That over-matches, and the over-matching is deliberate: an unrelated `send` elsewhere can
 only add an omission, and an omission is the answer that keeps the warning.
 
-Import aliases are resolved before the name match runs, and so are chains of them across modules.
-`from lib import collect as c`, re-exported by a package `__init__.py` and imported again elsewhere
-as `from pkg import c`, files every spelling of the call under `collect`. Each hop follows one
-import binding, and a hop whose target module is outside the tree you scanned still contributes the
-name before it ends there, which is all the match needs. This matters because an alias hides callers
-without adding any, and a caller the index cannot see counts as absent, which is the direction a
-false `LATENT` comes from.
+Second names are resolved before the name match runs, however many of them stand between a caller
+and the function. `from lib import collect as c` is one. A package `__init__.py` that re-exports it,
+imported again elsewhere as `from pkg import c`, is a chain of them. An `__init__.py` re-exporting
+by assignment instead, `from lib import collect` followed by `c = collect`, is a third, and so is
+a plain `handler = collect` in the caller's own file. Each hop follows one binding, imports and
+assignments alike, and a hop whose target module is outside the tree you scanned still contributes
+the name before it ends there, which is all the match needs.
 
-Four things count as no evidence at all, and each of them leaves a warning at `BITES`:
+This is the part worth getting right, because **a caller the index cannot see counts as absent, and
+an absent caller is where a false `LATENT` comes from**. One visible caller that passes the argument
+reads as the whole story while the call that omits it sits two files away under a different name.
+
+Two directions of error, and they are not symmetrical:
+
+- **A warning left at `BITES` that cannot actually fire** costs a reader two minutes.
+- **A warning cleared to `LATENT` that something can fire** is the answer this tool exists not to
+  give.
+
+So anything unresolved stays unresolved rather than being guessed. These count as no evidence, and
+on their own they leave a warning at `BITES`:
 
 - a `**kwargs` splat at the call site, which might be carrying the argument
 - a `*args` splat, which might be filling the position
 - **no caller anywhere**, which usually means a public entry point called from outside the tree you
   scanned, and is the case most likely to bite a stranger
-- a name that reaches the function some other way: a star import, a rebinding like
-  `handler = collect`, a re-export written as an assignment (`c = collect` in an `__init__.py`)
-  rather than as an import, a module-level `__getattr__`, or dispatch that only exists at runtime
+
+And these reach a function by a route no binding spells out, so the calls that use them are filed
+under a name of their own and the definition never hears of them:
+
+- a star import
+- a module-level `__getattr__`
+- a name that arrives through a data structure or through dispatch that only exists at runtime
+- a value built by a call rather than bound to a name, such as `c = make_handler()`
+
+**If one of those is the only route to a function, its warning stays at `BITES`**, which is the safe
+answer. **If other callers are visible as well, they are the only evidence there is**, and a warning
+can be cleared on a partial view. That is the boundary, stated as the risk it actually is.
 
 The index is only built when something came back `BITES`, so a run that finds nothing reachable
 never pays for the scan.
