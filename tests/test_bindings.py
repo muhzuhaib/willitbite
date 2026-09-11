@@ -24,6 +24,10 @@ def _bindings(source, module="pkg.mod", is_package=False):
     return callsites.import_bindings(ast.parse(source), module, is_package)
 
 
+def _rebindings(source, module="pkg.mod"):
+    return callsites.rebindings(ast.parse(source), module)
+
+
 # --------------------------------------------------------------------------
 # Module names.
 # --------------------------------------------------------------------------
@@ -91,3 +95,63 @@ def test_two_imports_of_one_local_name_keep_both_branches():
     assert _bindings("from a import x\nfrom b import x\n") == {
         "x": {("a", "x"), ("b", "x")}
     }
+
+
+# --------------------------------------------------------------------------
+# Rebinding tables. An import is not the only way a second name reaches a
+# function. An assignment makes one too, and a package that re-exports by
+# assignment hides its callers exactly as an alias does.
+# --------------------------------------------------------------------------
+
+
+def test_an_assignment_binds_a_second_spelling_in_its_own_module():
+    assert _rebindings("c = collect\n") == {"c": {("pkg.mod", "collect")}}
+
+
+def test_the_edge_stays_in_the_binding_module_so_the_next_hop_resolves_it():
+    # `pkg` re-exports by assignment, so `c` reaches `collect` in `pkg`, and
+    # `pkg`'s own import table carries `collect` the rest of the way to `lib`.
+    assert _rebindings("from lib import collect\nc = collect\n", module="pkg") == {
+        "c": {("pkg", "collect")}
+    }
+
+
+def test_an_attribute_value_records_the_attribute_name():
+    assert _rebindings("c = mod.collect\n") == {"c": {("pkg.mod", "collect")}}
+
+
+def test_an_annotated_assignment_binds_too():
+    assert _rebindings("c: Callable = collect\n") == {"c": {("pkg.mod", "collect")}}
+
+
+def test_an_annotation_without_a_value_binds_nothing():
+    assert _rebindings("c: Callable\n") == {}
+
+
+def test_a_chained_assignment_binds_every_target():
+    assert _rebindings("a = b = collect\n") == {
+        "a": {("pkg.mod", "collect")},
+        "b": {("pkg.mod", "collect")},
+    }
+
+
+def test_a_value_that_builds_a_new_object_binds_nothing():
+    assert _rebindings("c = collect()\nd = [collect]\ne = 3\n") == {}
+
+
+def test_a_name_bound_to_itself_records_no_edge():
+    assert _rebindings("collect = collect\n") == {}
+
+
+def test_two_assignments_of_one_name_keep_both_branches():
+    assert _rebindings("c = collect\nc = gather\n") == {
+        "c": {("pkg.mod", "collect"), ("pkg.mod", "gather")}
+    }
+
+
+def test_an_assignment_inside_a_function_is_collected_like_the_import_table():
+    assert _rebindings("def f():\n    c = collect\n") == {"c": {("pkg.mod", "collect")}}
+
+
+def test_unpacking_binds_nothing_because_the_value_is_not_one_name():
+    assert _rebindings("a, b = collect, gather\n") == {}

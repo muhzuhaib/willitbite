@@ -156,6 +156,51 @@ def import_bindings(tree, module, is_package):
     return bindings
 
 
+def rebindings(tree, module):
+    """Map each local name ``tree`` binds to another name to the name it stands for.
+
+    ``c = collect`` makes ``c`` another spelling of ``collect``, and a package
+    that re-exports by assignment rather than by import (``from lib import
+    collect`` in its ``__init__.py``, then ``c = collect``) is the shape that
+    reaches a caller who writes ``from pkg import c``. The edge points at the
+    module doing the binding rather than at the module the name originally came
+    from, because the next hop resolves it there through that module's own
+    imports: ``c`` in ``pkg`` reaches ``collect`` in ``pkg``, which reaches
+    ``collect`` in ``lib``.
+
+    ``c = mod.collect`` records the attribute's own name, for the same reason
+    the index already files ``mod.collect(...)`` under ``collect``: the spelling
+    is what the eventual match needs and where it lives is not.
+
+    Annotated assignments count, ``a = b = collect`` binds both targets, and
+    assignments inside functions are collected as if they were module level,
+    exactly as the import table over-approximates scope. A value that is not a
+    plain name or attribute binds no spelling worth following: a call, a literal
+    or a comprehension builds a new object rather than another way to say an
+    existing one. ``collect = collect`` is skipped because an edge from a name
+    to itself says nothing the written spelling does not already say.
+    """
+    bindings = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets = [node.target]
+        else:
+            continue
+        value = node.value
+        if isinstance(value, ast.Name):
+            name = value.id
+        elif isinstance(value, ast.Attribute):
+            name = value.attr
+        else:
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name) and target.id != name:
+                bindings.setdefault(target.id, set()).add((module, name))
+    return bindings
+
+
 def _parse(filename):
     """One file's syntax tree, or None if it cannot be read or parsed."""
     # Closed explicitly rather than left to the collector: this runs once
