@@ -19,8 +19,10 @@ add an omission and an omission is the answer that keeps the warning. Import
 aliases are resolved (``from lib import collect as c`` files ``c(...)`` under
 ``collect`` too), and so are chains of them across modules: a package that
 re-exports ``collect`` as ``c`` makes ``from pkg import c`` a caller of
-``collect``. Both matter because an alias hides callers without adding any,
-and hidden callers are the one direction this pass must never err in.
+``collect``. A re-export written as an assignment (``c = collect``) is
+followed too, and so is a plain rebinding of a name to another name. All of
+them matter because a second spelling hides callers without adding any, and
+hidden callers are the one direction this pass must never err in.
 
 **Everything unresolvable stays unresolved.** A ``**kwargs`` splat might be
 carrying the argument, a ``*args`` splat might be filling the position, and a
@@ -244,9 +246,10 @@ def index(root):
     is a source of evidence, and missing evidence is already handled: it leaves
     warnings where they are.
 
-    Two passes: the import bindings of every module are collected first,
-    because a call can only be filed under its full chain of spellings once
-    every module's bindings are known. Files are parsed again for their calls
+    Two passes: the bindings of every module are collected first, both the
+    ones its imports make and the ones its assignments make, because a call
+    can only be filed under its full chain of spellings once every module's
+    bindings are known. Files are parsed again for their calls
     rather than held in memory: a tree of a few thousand files is real, and a
     few thousand live syntax trees is its own kind of failure.
     """
@@ -257,8 +260,13 @@ def index(root):
             continue
         module = module_name(filename)
         is_package = os.path.basename(filename) == "__init__.py"
+        table = bindings[module]
         for local, sources in import_bindings(tree, module, is_package).items():
-            bindings[module].setdefault(local, set()).update(sources)
+            table.setdefault(local, set()).update(sources)
+        # Assignments go into the same table as imports because a hop does not
+        # care which of the two made the edge, only where the name goes next.
+        for local, sources in rebindings(tree, module).items():
+            table.setdefault(local, set()).update(sources)
 
     found = defaultdict(list)
     for filename in python_files(root):

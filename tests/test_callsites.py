@@ -380,6 +380,116 @@ def test_a_star_import_resolves_nothing(tmp_path):
 
 
 # --------------------------------------------------------------------------
+# Rebindings by assignment.
+#
+# An import is not the only way a second name reaches a function. A package
+# can re-export by assignment (``from lib import collect`` in its
+# ``__init__.py``, then ``c = collect``), and a caller can rebind a name in
+# its own file. Neither spelling is an import anywhere, so the chain that
+# followed re-exports could not see either one, and a caller it cannot see
+# counts as absent, which is the direction a false LATENT comes from.
+# --------------------------------------------------------------------------
+
+
+def test_an_assignment_reexport_stops_a_false_latent(tmp_path):
+    v = decide(
+        tmp_path,
+        {
+            "lib.py": MUTATES,
+            "pkg/__init__.py": "from lib import collect\nc = collect\n",
+            "app.py": "from pkg import c\nc(2)\n",
+            "other.py": "from lib import collect\ncollect(1, [])\n",
+        },
+    )
+    assert v.kind == BITES
+
+
+def test_a_supplying_caller_through_an_assignment_reexport_is_evidence(tmp_path):
+    v = decide(
+        tmp_path,
+        {
+            "lib.py": MUTATES,
+            "pkg/__init__.py": "from lib import collect\nc = collect\n",
+            "app.py": "from pkg import c\nc(1, [])\n",
+        },
+    )
+    assert v.kind == LATENT
+
+
+def test_a_rebinding_in_the_callers_own_file_is_followed(tmp_path):
+    v = decide(
+        tmp_path,
+        {
+            "lib.py": MUTATES,
+            "app.py": "from lib import collect\nhandler = collect\nhandler(2)\n",
+        },
+    )
+    assert v.kind == BITES
+
+
+def test_an_attribute_rebinding_is_followed(tmp_path):
+    v = decide(
+        tmp_path,
+        {
+            "lib.py": MUTATES,
+            "app.py": "import lib\nc = lib.collect\nc(2)\n",
+            "other.py": "from lib import collect\ncollect(1, [])\n",
+        },
+    )
+    assert v.kind == BITES
+
+
+def test_an_annotated_rebinding_is_followed(tmp_path):
+    v = decide(
+        tmp_path,
+        {
+            "lib.py": MUTATES,
+            "app.py": "from lib import collect\nh: object = collect\nh(2)\n",
+        },
+    )
+    assert v.kind == BITES
+
+
+def test_imports_and_assignments_chain_through_each_other(tmp_path):
+    # import, then assignment, then import again: three hops, two kinds.
+    v = decide(
+        tmp_path,
+        {
+            "lib.py": MUTATES,
+            "inner/__init__.py": "from lib import collect\nc = collect\n",
+            "outer/__init__.py": "from inner import c\n",
+            "app.py": "from outer import c\nc(2)\n",
+            "other.py": "from lib import collect\ncollect(1, [])\n",
+        },
+    )
+    assert v.kind == BITES
+
+
+def test_index_files_a_rebound_call_under_both_names(tmp_path):
+    calls = project(tmp_path, {"app.py": "handler = collect\nhandler(2)\n"})
+    assert len(calls["collect"]) == 1
+    assert len(calls["handler"]) == 1
+
+
+def test_a_rebinding_cycle_terminates(tmp_path):
+    calls = project(tmp_path, {"app.py": "a = b\nb = a\na(2)\n"})
+    assert len(calls["a"]) == 1
+
+
+def test_a_value_that_is_not_a_name_invents_no_caller(tmp_path):
+    """``c = make()`` is a new object, not another way to say an old name."""
+    v = decide(
+        tmp_path,
+        {
+            "lib.py": MUTATES,
+            "app.py": "c = make()\nc(2)\n",
+            "other.py": "from lib import collect\ncollect(1, [])\n",
+        },
+    )
+    assert v.kind == LATENT
+
+
+# --------------------------------------------------------------------------
 # The pass must not disturb anything else.
 # --------------------------------------------------------------------------
 
