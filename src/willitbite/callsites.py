@@ -319,8 +319,13 @@ def binds_self(fn):
     return True
 
 
-def supplies(call, name, index_in_signature, drop_self):
-    """Does this call site pass the parameter? True, False, or None for unknown."""
+def supplies(call, name, index_in_signature, bound):
+    """Does this call site pass the parameter? True, False, or None for unknown.
+
+    ``bound`` says the call fills the first parameter itself, as a method call
+    fills ``self`` and a constructor call fills the new instance, so the
+    positional arguments written at the site start one place later.
+    """
     for keyword in call.node.keywords:
         if keyword.arg == name:
             return True
@@ -330,7 +335,7 @@ def supplies(call, name, index_in_signature, drop_self):
         return False  # keyword-only, and no keyword of that name was given
     if any(isinstance(arg, ast.Starred) for arg in call.node.args):
         return None  # a *splat could be filling the position
-    wanted = index_in_signature - 1 if (drop_self and call.attribute) else index_in_signature
+    wanted = index_in_signature - 1 if bound else index_in_signature
     if wanted < 0:
         return None
     return len(call.node.args) > wanted
@@ -354,15 +359,23 @@ class Reach:
         return self.total > 0 and not self.omitting and not self.unknown
 
 
-def reach(fn, name, calls):
-    """Read the call sites of ``fn`` for what they do with ``name``."""
-    sites = calls.get(fn.name, ())
-    where = position(fn, name)
+def reach(fn, name, calls, owner=None):
+    """Read the call sites of ``fn`` for what they do with ``name``.
+
+    ``owner`` is the name of the class that defines ``fn``, when there is one.
+    It matters only for ``__init__``, which is almost never called by its own
+    name: ``Base(1)`` runs it too, so every call of the class counts as a call
+    site, with the new instance filling ``self``.
+    """
     drop_self = binds_self(fn)
+    sites = [(site, drop_self and site.attribute) for site in calls.get(fn.name, ())]
+    if fn.name == "__init__" and owner is not None:
+        sites += [(site, True) for site in calls.get(owner, ())]
+    where = position(fn, name)
 
     supplying, omitting, unknown = 0, [], []
-    for site in sites:
-        answer = supplies(site, name, where, drop_self)
+    for site, bound in sites:
+        answer = supplies(site, name, where, bound)
         if answer is True:
             supplying += 1
         elif answer is False:

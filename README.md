@@ -143,6 +143,10 @@ a plain `handler = collect` in the caller's own file. Each hop follows one bindi
 assignments alike, and a hop whose target module is outside the tree you scanned still contributes
 the name before it ends there, which is all the match needs.
 
+A constructor is the other spelling that matters. `Base(1)` runs `Base.__init__`, so every call of
+the class counts as a call site of its `__init__`, with the new instance filling `self`, alongside
+the `super().__init__(...)` calls filed under `__init__` itself.
+
 This is the part worth getting right, because **a caller the index cannot see counts as absent, and
 an absent caller is where a false `LATENT` comes from**. One visible caller that passes the argument
 reads as the whole story while the call that omits it sits two files away under a different name.
@@ -168,6 +172,8 @@ under a name of their own and the definition never hears of them:
 - a module-level `__getattr__`
 - a name that arrives through a data structure or through dispatch that only exists at runtime
 - a value built by a call rather than bound to a name, such as `c = make_handler()`
+- a constructor reached through a subclass that inherits `__init__`, such as `Child(1)`, or through
+  `cls(...)` inside a class method
 
 **If one of those is the only route to a function, its warning stays at `BITES`**, which is the safe
 answer. **If other callers are visible as well, they are the only evidence there is**, and a warning

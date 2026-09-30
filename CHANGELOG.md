@@ -3,6 +3,18 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- Constructor calls now count as call sites of `__init__`. `Base(1)` runs
+  `Base.__init__` but is spelled with the class name, so the call-site pass
+  filed it under `Base` alone; a subclass's `super().__init__(x, [])` then read
+  as the complete set of callers and a mutable default in `__init__` was
+  cleared `LATENT` while `Base(1)` shared it. Calls of the class are now read
+  with the new instance filling `self`, including through an import alias or
+  a module attribute.
+
 ## [0.1.3] - 2026-09-11
 
 ### Fixed

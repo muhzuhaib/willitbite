@@ -208,7 +208,15 @@ def analyse_param(fn, name):
     return Verdict(SAFE, f"`{name}` is never mutated, so sharing it is harmless")
 
 
-def _with_call_sites(fn, name, verdict, calls):
+def _owner(tree, fn):
+    """The name of the class whose body defines ``fn``, or None."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and fn in node.body:
+            return node.name
+    return None
+
+
+def _with_call_sites(fn, name, verdict, calls, owner=None):
     """Ask the callers whether the defect in ``fn`` can currently fire.
 
     Only a complete answer changes anything. If every call site was resolved and
@@ -221,7 +229,7 @@ def _with_call_sites(fn, name, verdict, calls):
     if calls is None:
         return verdict
 
-    found = reach(fn, name, calls)
+    found = reach(fn, name, calls, owner)
     reaching, _, _ = _reaching_mutations(fn, name)
     clause = _defect_clause(name, reaching)
 
@@ -261,7 +269,7 @@ def analyse(tree, line, parents=None, calls=None):
     decided = [(n, analyse_param(fn, n)) for n in names]
     for name, verdict in decided:
         if verdict.kind == BITES:
-            return _with_call_sites(fn, name, verdict, calls)
+            return _with_call_sites(fn, name, verdict, calls, _owner(tree, fn))
     for _, verdict in decided:
         if verdict.kind == CALLEE:
             return verdict

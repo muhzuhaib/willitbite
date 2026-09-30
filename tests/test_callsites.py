@@ -180,6 +180,66 @@ def test_a_bound_method_call_that_omits_it_still_bites(tmp_path):
 
 
 # --------------------------------------------------------------------------
+# Constructors.
+#
+# ``Base(1)`` runs ``Base.__init__`` but is spelled with the class name, so an
+# index keyed by called name files it under ``Base``. Before constructor calls
+# were counted, a lone ``super().__init__(x, [])`` was the complete set of
+# callers and the warning came back LATENT with ``Base(1)`` in the same tree.
+# --------------------------------------------------------------------------
+
+CONSTRUCTOR = '''
+class Base:
+    def __init__(self, x, items=[]):
+        items.append(x)
+        self.items = items
+
+
+class Child(Base):
+    def __init__(self, x):
+        super().__init__(x, [])
+'''
+
+
+def test_constructor_calls_count_as_init_callers(tmp_path):
+    v = decide(
+        tmp_path,
+        {"lib.py": CONSTRUCTOR, "app.py": "from lib import Base\nBase(1)\n"},
+        line=3,
+    )
+    assert v.kind == BITES
+
+
+def test_a_constructor_call_does_not_count_self(tmp_path):
+    """``Base(1, [])`` supplies ``items``: the instance is never written."""
+    v = decide(
+        tmp_path,
+        {"lib.py": CONSTRUCTOR, "app.py": "from lib import Base\nBase(1, [])\n"},
+        line=3,
+    )
+    assert v.kind == LATENT
+    assert "2 call sites" in v.reason
+
+
+def test_a_constructor_call_through_an_alias_is_found(tmp_path):
+    v = decide(
+        tmp_path,
+        {"lib.py": CONSTRUCTOR, "app.py": "from lib import Base as B\nB(1)\n"},
+        line=3,
+    )
+    assert v.kind == BITES
+
+
+def test_a_constructor_call_through_the_module_is_found(tmp_path):
+    v = decide(
+        tmp_path,
+        {"lib.py": CONSTRUCTOR, "app.py": "import lib\nlib.Base(1)\n"},
+        line=3,
+    )
+    assert v.kind == BITES
+
+
+# --------------------------------------------------------------------------
 # Import aliases.
 #
 # ``from lib import collect as c`` spells every call ``c(...)``. The pass
