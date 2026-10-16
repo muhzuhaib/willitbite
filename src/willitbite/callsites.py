@@ -72,6 +72,31 @@ class Call:
     attribute: bool  #: written as ``x.name(...)`` rather than ``name(...)``
 
 
+class CallIndex(defaultdict):
+    """Calls indexed by spelling, with class metadata for constructors."""
+
+    def __init__(self):
+        super().__init__(list)
+        self.classes = {}
+        self.init_classes = set()
+        self.classmethod_cls_calls = []
+
+
+def _init_owner(class_name, classes, init_classes):
+    """Return the first class whose ``__init__`` a constructor call runs."""
+    frontier = [class_name]
+    seen = set()
+    while frontier:
+        current = frontier.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        if current in init_classes:
+            return current
+        frontier.extend(reversed(classes.get(current, ())))
+    return None
+
+
 def python_files(root):
     """Every ``.py`` file under ``root``, skipping the directories above."""
     root = str(root)
@@ -251,7 +276,8 @@ def index(root):
     can only be filed under its full chain of spellings once every module's
     bindings are known. Files are parsed again for their calls
     rather than held in memory: a tree of a few thousand files is real, and a
-    few thousand live syntax trees is its own kind of failure.
+    few thousand live syntax trees is its own kind of failure. The second pass
+    also collects class bases, __init__ owners and class method cls(...) calls.
     """
     bindings = defaultdict(dict)
     for filename in python_files(root):
@@ -268,12 +294,41 @@ def index(root):
         for local, sources in rebindings(tree, module).items():
             table.setdefault(local, set()).update(sources)
 
-    found = defaultdict(list)
+    found = CallIndex()
     for filename in python_files(root):
         tree = _parse(filename)
         if tree is None:
             continue
         module = module_name(filename)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            found.classes[node.name] = [
+                base.id for base in node.bases if isinstance(base, ast.Name)
+            ]
+            if any(
+                isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and member.name == "__init__"
+                for member in node.body
+            ):
+                found.init_classes.add(node.name)
+            for member in node.body:
+                if not isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                labels = {
+                    getattr(dec, "id", getattr(dec, "attr", ""))
+                    for dec in member.decorator_list
+                }
+                if "classmethod" not in labels:
+                    continue
+                for call in ast.walk(member):
+                    if not isinstance(call, ast.Call):
+                        continue
+                    if not isinstance(call.func, ast.Name) or call.func.id != "cls":
+                        continue
+                    found.classmethod_cls_calls.append(
+                        (node.name, Call(filename, call.lineno, call, False))
+                    )
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -370,10 +425,21 @@ def reach(fn, name, calls, owner=None):
     drop_self = binds_self(fn)
     sites = [(site, drop_self and site.attribute) for site in calls.get(fn.name, ())]
     if fn.name == "__init__" and owner is not None:
-        sites += [(site, True) for site in calls.get(owner, ())]
+        sites += [
+            (site, True)
+            for class_name in calls.classes
+            if _init_owner(class_name, calls.classes, calls.init_classes) == owner
+            for site in calls.get(class_name, ())
+        ]
     where = position(fn, name)
 
     supplying, omitting, unknown = 0, [], []
+    if fn.name == "__init__" and owner is not None:
+        unknown.extend(
+            call
+            for class_name, call in calls.classmethod_cls_calls
+            if _init_owner(class_name, calls.classes, calls.init_classes) == owner
+        )
     for site, bound in sites:
         answer = supplies(site, name, where, bound)
         if answer is True:

@@ -7,6 +7,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- A subclass that inherits `__init__` now counts as a caller of it. `Child(1)`
+  runs `Base.__init__`, but was filed under `Child` alone, so a visible
+  `Base(1, [])` that passes the argument read as the only caller and the
+  default was cleared `LATENT`. Each class call now goes to the nearest
+  `__init__` up its bases, first base first, and a `cls(...)` call in a class
+  method keeps the answer at `BITES`.
+
 - Constructor calls now count as call sites of `__init__`. `Base(1)` runs
   `Base.__init__` but is spelled with the class name, so the call-site pass
   filed it under `Base` alone; a subclass's `super().__init__(x, [])` then read
