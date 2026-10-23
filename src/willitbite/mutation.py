@@ -22,16 +22,24 @@ from .verdict import BITES, CALLEE, LATENT, SAFE, Verdict
 MUTATORS = frozenset(
     {
         "append",
+        "appendleft",
         "extend",
+        "extendleft",
         "insert",
         "add",
         "update",
+        "difference_update",
+        "intersection_update",
+        "symmetric_difference_update",
         "setdefault",
         "pop",
+        "popleft",
         "popitem",
         "remove",
         "clear",
         "sort",
+        "reverse",
+        "rotate",
         "discard",
     }
 )

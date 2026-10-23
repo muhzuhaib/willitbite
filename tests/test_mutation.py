@@ -65,6 +65,27 @@ def test_mutated_defaults_bite(src, line):
     assert verdict(src, line).kind == BITES
 
 
+@pytest.mark.parametrize(
+    "default,call",
+    [
+        ("[]", "reverse()"),
+        ("deque()", "appendleft(x)"),
+        ("deque()", "popleft()"),
+        ("deque()", "extendleft([x])"),
+        ("deque()", "rotate(1)"),
+        ("set()", "difference_update({x})"),
+        ("set()", "intersection_update({x})"),
+        ("set()", "symmetric_difference_update({x})"),
+    ],
+)
+def test_in_place_method_is_a_mutation(default, call):
+    src = f"""
+def collect(x, items={default}):
+    items.{call}
+"""
+    assert verdict(src, 2).kind == BITES
+
+
 def test_bites_reason_points_at_the_line():
     v = verdict(APPEND_TO_DEFAULT, 2)
     assert "items.append()" in v.reason

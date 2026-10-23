@@ -7,6 +7,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `items.reverse()` on a mutable default now reads as a mutation, as do the
+  in-place deque methods (`appendleft`, `popleft`, `extendleft`, `rotate`)
+  and the set `*_update` methods. Each one was judged safe before.
+
 - A subclass that inherits `__init__` now counts as a caller of it. `Child(1)`
   runs `Base.__init__`, but was filed under `Child` alone, so a visible
   `Base(1, [])` that passes the argument read as the only caller and the
