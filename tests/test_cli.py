@@ -147,3 +147,13 @@ def test_no_warnings_says_so(tmp_path, capsys):
     payload = write(tmp_path, "ruff.json", "[]")
     assert cli.main([str(tmp_path), "--json", str(payload)]) == 0
     assert "No B006 or B023 warnings found" in capsys.readouterr().out
+
+
+def test_missing_path_exits_2(tmp_path, capsys):
+    missing = tmp_path / "no_such_dir_xyz"
+    code = cli.main([str(missing)])
+    captured = capsys.readouterr()
+
+    assert code == 2, "a path that does not exist must not report a clean run"
+    assert str(missing) in captured.err
+    assert "No B006 or B023 warnings found" not in captured.out

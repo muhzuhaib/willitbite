@@ -15,6 +15,7 @@ for anyone who would rather run their own ruff and pipe the result in.
 """
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -56,6 +57,10 @@ def _ruff_command():
 
 def run(path, rules=SUPPORTED):
     """Run ruff over ``path`` and return its findings for ``rules``."""
+    if not os.path.exists(path):
+        # Ruff would treat a missing path as an empty tree and report nothing,
+        # which reads as a clean run. A typo in a CI step must fail instead.
+        raise FileNotFoundError(f"path not found: {path}")
     command = _ruff_command() + [
         "check",
         # The project's own configuration is deliberately ignored: the people
