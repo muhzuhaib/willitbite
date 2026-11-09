@@ -112,6 +112,27 @@ def test_safe_warnings_hidden_unless_asked(tmp_path, capsys):
     assert "[SAFE]" in capsys.readouterr().out
 
 
+def test_a_file_with_a_utf8_bom_is_read(tmp_path, capsys):
+    src = tmp_path / "biting.py"
+    src.write_text(BITING_SOURCE, encoding="utf-8-sig")
+    payload = write(tmp_path, "ruff.json", ruff_json(src, [("B023", 5), ("B006", 9)]))
+
+    code = cli.main([str(tmp_path), "--json", str(payload)])
+    out = capsys.readouterr().out
+
+    assert code == 1
+    assert "unreadable" not in out
+    assert "2 of 2 warning(s) can actually bite" in out
+
+
+def test_ruff_output_saved_with_a_utf8_bom_is_read(tmp_path, capsys):
+    src = write(tmp_path, "biting.py", BITING_SOURCE)
+    payload = tmp_path / "ruff.json"
+    payload.write_text(ruff_json(src, [("B023", 5)]), encoding="utf-8-sig")
+
+    assert cli.main([str(tmp_path), "--json", str(payload)]) == 1
+
+
 def test_unreadable_file_does_not_crash(tmp_path, capsys):
     payload = write(
         tmp_path, "ruff.json", ruff_json(tmp_path / "gone.py", [("B023", 1)])

@@ -779,3 +779,8 @@ def test_cli_separates_latent_from_biting(tmp_path):
 def test_latent_alone_does_not_fail_the_build(tmp_path):
     """The exit code answers "can this bite today", and a latent defect cannot."""
     assert not any(r["verdict"].actionable for r in latent_project(tmp_path))
+
+
+def test_a_caller_in_a_utf8_bom_file_is_still_indexed(tmp_path):
+    (tmp_path / "caller.py").write_text("from lib import collect\ncollect(1)\n", encoding="utf-8-sig")
+    assert callsites._parse(str(tmp_path / "caller.py")) is not None

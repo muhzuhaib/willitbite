@@ -7,6 +7,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- A source file or a saved ruff report that starts with a UTF-8 byte order
+  mark is now read normally. Such a source file used to report CALLEE
+  "unreadable" and its callers dropped out of the index.
+
 - `items.reverse()` on a mutable default now reads as a mutation, as do the
   in-place deque methods (`appendleft`, `popleft`, `extendleft`, `rotate`)
   and the set `*_update` methods. Each one was judged safe before.

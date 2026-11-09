@@ -234,7 +234,7 @@ def _parse(filename):
     # per file across a whole source tree, and a few thousand open handles
     # is its own kind of failure.
     try:
-        with open(filename, encoding="utf-8") as handle:
+        with open(filename, encoding="utf-8-sig") as handle:
             return ast.parse(handle.read())
     except (OSError, SyntaxError, ValueError, UnicodeDecodeError):
         return None

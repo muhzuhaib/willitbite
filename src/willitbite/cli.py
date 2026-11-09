@@ -36,7 +36,7 @@ def decide(findings, root=None):
     decided = []
     for filename, group in by_file.items():
         try:
-            source = io.open(filename, encoding="utf-8").read()
+            source = io.open(filename, encoding="utf-8-sig").read()
             tree = ast.parse(source)
         except (OSError, SyntaxError) as exc:
             for finding in group:
@@ -166,7 +166,7 @@ def main(argv=None):
 
     try:
         if args.json_in:
-            findings = ruffrun.parse(io.open(args.json_in, encoding="utf-8").read())
+            findings = ruffrun.parse(io.open(args.json_in, encoding="utf-8-sig").read())
         else:
             findings = ruffrun.run(args.path)
     except (ruffrun.RuffMissing, RuntimeError, OSError) as exc:
