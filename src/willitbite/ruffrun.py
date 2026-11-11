@@ -89,6 +89,11 @@ def parse(text):
         raw = json.loads(text)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"could not read ruff output as JSON: {exc}") from exc
+    if not isinstance(raw, list) or not all(isinstance(item, dict) for item in raw):
+        raise RuntimeError(
+            "ruff output is not a list of findings: pass the output of "
+            "`ruff check --output-format json`"
+        )
 
     findings = []
     for item in raw:

@@ -7,6 +7,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `--json` given valid JSON that is not a ruff report, such as `null` or a
+  SARIF file, now exits 2 with a message saying so. It used to end in a
+  traceback.
+
 - A source file or a saved ruff report that starts with a UTF-8 byte order
   mark is now read normally. Such a source file used to report CALLEE
   "unreadable" and its callers dropped out of the index.
