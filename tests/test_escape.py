@@ -103,6 +103,45 @@ def test_lambda_consumed_by_sorted_is_safe():
     assert verdict(SORTED_KEY, 3).kind == SAFE
 
 
+SORTED_DEF_KEY = """
+for column in columns:
+    def keyfn(r):
+        return r[column]
+    rows = sorted(rows, key=keyfn)
+"""
+
+THREAD_DEF_TARGET = """
+for column in columns:
+    def work():
+        return column
+    Thread(target=work).start()
+"""
+
+HELPER_DEF_KEYWORD = """
+for column in columns:
+    def work():
+        return column
+    run_with_retry(fn=work)
+"""
+
+
+def test_def_passed_as_sorted_key_is_safe():
+    """A def handed to sorted() by keyword runs now, exactly like the lambda form."""
+    v = verdict(SORTED_DEF_KEY, 4)
+    assert v.kind == SAFE
+    assert "sorted" in v.reason
+
+
+def test_def_passed_by_keyword_to_a_keeper_still_bites():
+    assert verdict(THREAD_DEF_TARGET, 4).kind == BITES
+
+
+def test_def_passed_by_keyword_to_unknown_function_names_it():
+    v = verdict(HELPER_DEF_KEYWORD, 4)
+    assert v.kind == CALLEE
+    assert "run_with_retry" in v.reason
+
+
 # --------------------------------------------------------------------------
 # The honest third answer.
 # --------------------------------------------------------------------------

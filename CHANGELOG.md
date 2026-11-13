@@ -7,6 +7,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- A function defined in a loop and handed to another call by keyword, such as
+  `sorted(rows, key=keyfn)`, is now judged the same way as when it is passed
+  by position. It used to be reported as stored, so the safe `sorted` case
+  read as BITES.
+
 - `--json` given valid JSON that is not a ruff report, such as `null` or a
   SARIF file, now exits 2 with a message saying so. It used to end in a
   traceback.

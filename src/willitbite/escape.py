@@ -120,6 +120,9 @@ def classify_def(fn, loop, parents):
         if not isinstance(node.ctx, ast.Load):
             continue
         up = parents.get(node)
+        if isinstance(up, ast.keyword) and isinstance(parents.get(up), ast.Call):
+            # ``f(key=NAME)`` hands NAME to f just like ``f(NAME)`` does.
+            up = parents[up]
         if isinstance(up, ast.Call) and up.func is node:
             called += 1
         elif isinstance(up, ast.Call):
