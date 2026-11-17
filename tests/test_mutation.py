@@ -159,6 +159,58 @@ def test_default_passed_elsewhere_names_the_callee():
     assert "install" in v.reason
 
 
+STORED_ON_SELF = """
+class Box:
+    def __init__(self, items=[]):
+        self.items = items
+
+    def add(self, x):
+        self.items.append(x)
+"""
+
+RETURNED_AS_IS = """
+def configure(opts={}):
+    return opts
+"""
+
+ALIASED = """
+def collect(items=[]):
+    alias = items
+    alias.append(1)
+"""
+
+STORED_IN_CONTAINER = """
+def collect(items=[]):
+    return {"items": items}
+"""
+
+
+def test_default_stored_on_self_is_not_safe():
+    """The default is kept, so a method elsewhere can change it: never SAFE."""
+    v = verdict(STORED_ON_SELF, 3)
+    assert v.kind == CALLEE
+    assert "self.items" in v.reason or "stored" in v.reason
+
+
+@pytest.mark.parametrize(
+    "src,line,word",
+    [
+        (RETURNED_AS_IS, 2, "returned"),
+        (ALIASED, 2, "stored"),
+        (STORED_IN_CONTAINER, 2, "returned"),
+    ],
+)
+def test_default_that_leaves_the_function_is_not_safe(src, line, word):
+    v = verdict(src, line)
+    assert v.kind == CALLEE
+    assert word in v.reason
+
+
+def test_rebound_default_that_is_returned_stays_safe():
+    src = "\ndef f(items=[]):\n    items = list(items)\n    return items\n"
+    assert verdict(src, 2).kind == SAFE
+
+
 # --------------------------------------------------------------------------
 # Signature reading.
 # --------------------------------------------------------------------------

@@ -7,6 +7,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- A mutable default that is stored (`self.items = items`, `alias = items`) or
+  returned is now reported as CALLEE instead of SAFE, because code outside the
+  function can change it later. A default that is rebound to a copy first is
+  still SAFE.
+
 - A function defined in a loop and handed to another call by keyword, such as
   `sorted(rows, key=keyfn)`, is now judged the same way as when it is passed
   by position. It used to be reported as stored, so the safe `sorted` case

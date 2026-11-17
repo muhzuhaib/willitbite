@@ -144,12 +144,43 @@ def _mutations(fn, name):
     return found
 
 
+def _kept_or_returned(fn, name):
+    """How the default leaves the function without being passed to a call, or None.
+
+    ``self.items = items``, ``alias = items`` and ``return items`` all hand the
+    shared object to code this body cannot see, so a mutation elsewhere reaches
+    the default just as one in this body would. The name may sit inside a
+    tuple, list, set or dict on its way out.
+    """
+    parents = {}
+    for node in ast.walk(fn):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+    holders = (ast.Tuple, ast.List, ast.Set, ast.Dict, ast.Starred)
+    for node in ast.walk(fn):
+        if not (isinstance(node, ast.Name) and node.id == name):
+            continue
+        if not isinstance(node.ctx, ast.Load):
+            continue
+        up = parents.get(node)
+        while isinstance(up, holders):
+            up = parents.get(up)
+        if isinstance(up, (ast.Return, ast.Yield, ast.YieldFrom)):
+            return "returned"
+        if isinstance(up, (ast.Assign, ast.AnnAssign, ast.NamedExpr)) and up.value is not None:
+            return "stored"
+    return None
+
+
 def _escapes_unchanged(fn, name):
     """Is the default handed to something that could keep or mutate it?
 
     A default that is only read inside the function can still be mutated a frame
-    down if it is passed on by reference. Calls that provably cannot change it
-    are excluded, or every ``len(items)`` would look like a risk.
+    down if it is passed on by reference, or later if it is stored or returned.
+    Calls that provably cannot change it are excluded, or every ``len(items)``
+    would look like a risk.
+
+    Returns a sentence fragment saying how it leaves, or None.
     """
     for node in ast.walk(fn):
         if not isinstance(node, ast.Call):
@@ -160,12 +191,21 @@ def _escapes_unchanged(fn, name):
         )
         if callee_name in NON_MUTATING:
             continue
-        for arg in node.args:
-            if isinstance(arg, ast.Name) and arg.id == name:
-                return callee_name or "a call"
-        for kw in node.keywords:
-            if isinstance(kw.value, ast.Name) and kw.value.id == name:
-                return callee_name or "a call"
+        passed = [a for a in node.args if isinstance(a, ast.Name) and a.id == name]
+        passed += [
+            kw.value for kw in node.keywords
+            if isinstance(kw.value, ast.Name) and kw.value.id == name
+        ]
+        if passed:
+            return (
+                f"is passed to {callee_name or 'a call'}(), which could mutate it "
+                f"a frame down"
+            )
+    how = _kept_or_returned(fn, name)
+    if how == "returned":
+        return "is returned, so the caller can mutate the shared default"
+    if how == "stored":
+        return "is stored (on self or under another name), so it can be mutated later"
     return None
 
 
@@ -209,8 +249,7 @@ def analyse_param(fn, name):
     if escapee:
         return Verdict(
             CALLEE,
-            f"`{name}` is never mutated here but is passed to {escapee}(), which "
-            f"could mutate it a frame down",
+            f"`{name}` is never mutated here but {escapee}",
         )
 
     return Verdict(SAFE, f"`{name}` is never mutated, so sharing it is harmless")
