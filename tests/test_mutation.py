@@ -206,6 +206,47 @@ def test_default_that_leaves_the_function_is_not_safe(src, line, word):
     assert word in v.reason
 
 
+CONDITIONAL_REBIND = """
+def collect(x, acc=[], copy=False):
+    if copy:
+        acc = list(acc)
+    acc.append(x)
+    return acc
+"""
+
+REBIND_ON_BOTH_BRANCHES = """
+def collect(x, acc=[], copy=False):
+    if copy:
+        acc = list(acc)
+    else:
+        acc = []
+    acc.append(x)
+    return acc
+"""
+
+REBIND_UNDER_WITH = """
+def collect(x, acc=[]):
+    with lock:
+        acc = list(acc)
+    acc.append(x)
+"""
+
+
+def test_rebind_inside_if_does_not_protect_later_mutation():
+    """When the branch is not taken, acc is still the shared default."""
+    v = verdict(CONDITIONAL_REBIND, 2)
+    assert v.kind == BITES
+    assert "line 5" in v.reason
+
+
+def test_rebind_on_every_branch_still_protects():
+    assert verdict(REBIND_ON_BOTH_BRANCHES, 2).kind == SAFE
+
+
+def test_rebind_inside_with_still_protects():
+    assert verdict(REBIND_UNDER_WITH, 2).kind == SAFE
+
+
 def test_rebound_default_that_is_returned_stays_safe():
     src = "\ndef f(items=[]):\n    items = list(items)\n    return items\n"
     assert verdict(src, 2).kind == SAFE

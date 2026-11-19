@@ -100,29 +100,49 @@ def _is_mutable(node):
     return False
 
 
+def _stores(target, name):
+    """Does assigning to ``target`` bind the plain name ``name``?"""
+    return any(
+        isinstance(n, ast.Name) and n.id == name and isinstance(n.ctx, ast.Store)
+        for n in ast.walk(target)
+    )
+
+
+def _always_rebinds(body, name):
+    """Line of the first statement in ``body`` that rebinds ``name`` whichever path runs.
+
+    Only statements that cannot be skipped count: a plain assignment, a ``with``
+    whose body does it, or an ``if`` whose every branch does it. A rebind inside
+    ``if copy:`` leaves the name pointing at the shared default whenever the
+    branch is not taken, so it protects nothing after the ``if``.
+    """
+    for stmt in body:
+        if isinstance(stmt, ast.Assign) and any(_stores(t, name) for t in stmt.targets):
+            return stmt.lineno
+        if isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+            if _stores(stmt.target, name):
+                return stmt.lineno
+        if isinstance(stmt, (ast.With, ast.AsyncWith)):
+            if any(i.optional_vars is not None and _stores(i.optional_vars, name) for i in stmt.items):
+                return stmt.lineno
+            inner = _always_rebinds(stmt.body, name)
+            if inner is not None:
+                return inner
+        if isinstance(stmt, ast.If) and stmt.orelse:
+            if _always_rebinds(stmt.body, name) and _always_rebinds(stmt.orelse, name):
+                return stmt.lineno
+    return None
+
+
 def _rebind_line(fn, name):
-    """First line where ``name`` is assigned, or None.
+    """First line where ``name`` is assigned on every path, or None.
 
     After a rebind the name refers to a new object, so anything done to it from
-    that point on cannot reach the shared default.
+    that point on cannot reach the shared default. ``items += [1]`` is not a
+    rebind: on a list it calls __iadd__, which extends in place, and it is not
+    an assignment statement here, so it never hides the mutation it performs.
     """
-    augmented = {
-        node.target
-        for node in ast.walk(fn)
-        if isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name)
-    }
-    lines = [
-        node.lineno
-        for node in ast.walk(fn)
-        if isinstance(node, ast.Name)
-        and node.id == name
-        and isinstance(node.ctx, ast.Store)
-        # ``items += [1]`` on a list calls __iadd__, which extends in place. It
-        # is a Store node but it does not produce a new object, so counting it
-        # as a rebind would hide the very mutation it performs.
-        and node not in augmented
-    ]
-    return min(lines) if lines else None
+    return _always_rebinds(fn.body, name)
 
 
 def _mutations(fn, name):

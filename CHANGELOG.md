@@ -7,6 +7,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- A mutable default rebound only inside an `if` (`if copy: acc = list(acc)`)
+  no longer counts as protected: a later `acc.append(x)` is reported as
+  BITES, since the branch may not run. A rebind that happens on every path,
+  including both branches of an `if`/`else`, still reads as SAFE.
+
 - A mutable default that is stored (`self.items = items`, `alias = items`) or
   returned is now reported as CALLEE instead of SAFE, because code outside the
   function can change it later. A default that is rebound to a copy first is
